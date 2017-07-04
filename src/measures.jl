@@ -92,6 +92,10 @@ function majority_vote(labels::Vector)
     return top_vote
 end
 
+function majority_vote(counts::Dict)
+    sort(collect(zip(values(counts),keys(counts))), rev=true)[1][2]
+end
+
 ### Classification ###
 
 function confusion_matrix(actual::Vector, predicted::Vector)

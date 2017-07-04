@@ -118,11 +118,11 @@ function build_tree(labels::Vector, features::Matrix, nsubfeatures=0, maxdepth=-
     if maxdepth < -1
         error("Unexpected value for maxdepth: $(maxdepth) (expected: maxdepth >= 0, or maxdepth = -1 for infinite depth)")
     elseif maxdepth==0
-        return Leaf(majority_vote(labels), labels)
+        return LeafC(majority_vote(labels), _hist(labels))
     end
     S = _split(labels, features, nsubfeatures, [0], rng)
     if S == NO_BEST
-        return Leaf(majority_vote(labels), labels)
+        return LeafC(majority_vote(labels), _hist(labels))
     end
     id, thresh = S
     split = features[:,id] .< thresh
@@ -131,21 +131,21 @@ function build_tree(labels::Vector, features::Matrix, nsubfeatures=0, maxdepth=-
     pure_left = all(labels_left .== labels_left[1])
     pure_right = all(labels_right .== labels_right[1])
     if pure_right && pure_left
-        return Node(id, thresh,
-                    Leaf(labels_left[1], labels_left),
-                    Leaf(labels_right[1], labels_right))
+        return NodeC(id, thresh,
+                    LeafC(labels_left[1], _hist(labels_left)),
+                    LeafC(labels_right[1], _hist(labels_right)))
     elseif pure_left
-        return Node(id, thresh,
-                    Leaf(labels_left[1], labels_left),
+        return NodeC(id, thresh,
+                    LeafC(labels_left[1], _hist(labels_left)),
                     build_tree(labels_right,features[neg(split),:], nsubfeatures,
                                max(maxdepth-1, -1); rng=rng))
     elseif pure_right
-        return Node(id, thresh,
+        return NodeC(id, thresh,
                     build_tree(labels_left,features[split,:], nsubfeatures,
                                max(maxdepth-1, -1); rng=rng),
-                    Leaf(labels_right[1], labels_right))
+                    LeafC(labels_right[1], _hist(labels_right)))
     else
-        return Node(id, thresh,
+        return NodeC(id, thresh,
                     build_tree(labels_left,features[split,:], nsubfeatures,
                                max(maxdepth-1, -1); rng=rng),
                     build_tree(labels_right,features[neg(split),:], nsubfeatures,
@@ -153,23 +153,23 @@ function build_tree(labels::Vector, features::Matrix, nsubfeatures=0, maxdepth=-
     end
 end
 
-function prune_tree(tree::LeafOrNode, purity_thresh=1.0)
-    function _prune_run(tree::LeafOrNode, purity_thresh::Real)
+function prune_tree(tree::LeafCOrNodeC, purity_thresh=1.0)
+    function _prune_run(tree::LeafCOrNodeC, purity_thresh::Real)
         N = length(tree)
         if N == 1        ## a Leaf
             return tree
         elseif N == 2    ## a stump
-            all_labels = [tree.left.values; tree.right.values]
-            majority = majority_vote(all_labels)
-            matches = find(all_labels .== majority)
-            purity = length(matches) / length(all_labels)
+            all_counts = merge(+, tree.left.counts, tree.right.counts)
+            majority = majority_vote(all_counts)
+            matches = all_counts[majority]
+            purity = matches / sum(values(all_counts))
             if purity >= purity_thresh
-                return Leaf(majority, all_labels)
+                return LeafC(majority, all_counts)
             else
                 return tree
             end
         else
-            return Node(tree.featid, tree.featval,
+            return NodeC(tree.featid, tree.featval,
                         _prune_run(tree.left, purity_thresh),
                         _prune_run(tree.right, purity_thresh))
         end
@@ -182,9 +182,20 @@ function prune_tree(tree::LeafOrNode, purity_thresh=1.0)
     return pruned
 end
 
-apply_tree(leaf::Leaf, feature::Vector) = leaf.majority
+# Used to convert array of labels per leaf to counts
+function compact_tree(tree::Leaf)
+    return LeafC(tree.majority, _hist(tree.values))
+end
 
-function apply_tree(tree::Node, features::Vector)
+function compact_tree(tree::Node)
+    return NodeC(tree.featid, tree.featval,
+                compact_tree(tree.left),
+                compact_tree(tree.right))
+end
+
+apply_tree(leaf::Union{Leaf,LeafC}, feature::Vector) = leaf.majority
+
+function apply_tree(tree::Union{Node,NodeC}, features::Vector)
     if tree.featval == nothing
         return apply_tree(tree.left, features)
     elseif features[tree.featid] < tree.featval
@@ -194,7 +205,7 @@ function apply_tree(tree::Node, features::Vector)
     end
 end
 
-function apply_tree(tree::LeafOrNode, features::Matrix)
+function apply_tree(tree::Union{LeafOrNode,LeafCOrNodeC}, features::Matrix)
     N = size(features,1)
     predictions = Array{Any}(N)
     for i in 1:N

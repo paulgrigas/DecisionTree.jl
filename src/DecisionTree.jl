@@ -7,7 +7,7 @@ using Compat
 import Base: length, convert, promote_rule, show, start, next, done
 
 export Leaf, Node, Ensemble, print_tree, depth, build_stump, build_tree,
-       prune_tree, apply_tree, apply_tree_proba, nfoldCV_tree, build_forest,
+       prune_tree, compact_tree, apply_tree, apply_tree_proba, nfoldCV_tree, build_forest,
        apply_forest, apply_forest_proba, nfoldCV_forest, build_adaboost_stumps,
        apply_adaboost_stumps, apply_adaboost_stumps_proba, nfoldCV_stumps,
        majority_vote, ConfusionMatrix, confusion_matrix, mean_squared_error,
@@ -44,6 +44,11 @@ immutable Leaf
     values::Vector
 end
 
+immutable LeafC
+    majority::Any
+    counts::Dict{Any,Int64}
+end
+
 immutable Node
     featid::Integer
     featval::Any
@@ -51,10 +56,18 @@ immutable Node
     right::Union{Leaf,Node}
 end
 
+immutable NodeC
+    featid::Integer
+    featval::Any
+    left::Union{LeafC,NodeC}
+    right::Union{LeafC,NodeC}
+end
+
 const LeafOrNode = Union{Leaf,Node}
+const LeafCOrNodeC = Union{LeafC,NodeC}
 
 immutable Ensemble
-    trees::Vector{Node}
+    trees::Vector{Union{Node,NodeC}}
 end
 
 convert(::Type{Node}, x::Leaf) = Node(0, nothing, x, Leaf(nothing,[nothing]))
@@ -84,11 +97,15 @@ include("scikitlearnAPI.jl")
 ########## Methods ##########
 
 length(leaf::Leaf) = 1
+length(leaf::LeafC) = 1
 length(tree::Node) = length(tree.left) + length(tree.right)
+length(tree::NodeC) = length(tree.left) + length(tree.right)
 length(ensemble::Ensemble) = length(ensemble.trees)
 
 depth(leaf::Leaf) = 0
+depth(leaf::LeafC) = 0
 depth(tree::Node) = 1 + max(depth(tree.left), depth(tree.right))
+depth(tree::NodeC) = 1 + max(depth(tree.left), depth(tree.right))
 
 function print_tree(leaf::Leaf, depth=-1, indent=0)
     matches = find(leaf.values .== leaf.majority)
@@ -96,7 +113,13 @@ function print_tree(leaf::Leaf, depth=-1, indent=0)
     println("$(leaf.majority) : $(ratio)")
 end
 
-function print_tree(tree::Node, depth=-1, indent=0)
+function print_tree(leaf::LeafC, depth=-1, indent=0)
+    matches = leaf.counts[leaf.majority]
+    ratio = string(matches) * "/" * string(sum(values(leaf.counts)))
+    println("$(leaf.majority) : $(ratio)")
+end
+
+function print_tree(tree::Union{Node,NodeC}, depth=-1, indent=0)
     if depth == indent
         println()
         return
@@ -114,7 +137,13 @@ function show(io::IO, leaf::Leaf)
     print(io,   "Samples:  $(length(leaf.values))")
 end
 
-function show(io::IO, tree::Node)
+function show(io::IO, leaf::LeafC)
+    println(io, "Compact Decision Leaf")
+    println(io, "Majority: $(leaf.majority)")
+    print(io,   "Samples:  $(sum(values(leaf.counts)))")
+end
+
+function show(io::IO, tree::Union{Node,NodeC})
     println(io, "Decision Tree")
     println(io, "Leaves: $(length(tree))")
     print(io,   "Depth:  $(depth(tree))")

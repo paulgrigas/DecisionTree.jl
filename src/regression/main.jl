@@ -74,18 +74,50 @@ function build_forest(
     n_samples = floor(Int, partial_sampling * t_samples)
 
     rngs = mk_rng(rng)::Random.AbstractRNG
-    forest = Distributed.@distributed (vcat) for i in 1:n_trees
-        inds = rand(rngs, 1:t_samples, n_samples)
-        build_tree(
-            labels[inds],
-            features[inds,:],
-            n_subfeatures,
-            max_depth,
-            min_samples_leaf,
-            min_samples_split,
-            min_purity_increase,
-            rng = rngs)
+
+    ## My modification starts here
+    # Initial tree
+    inds = rand(rngs, 1:t_samples, n_samples)
+    forest = build_tree(
+        labels[inds],
+        features[inds,:],
+        n_subfeatures,
+        max_depth,
+        min_samples_leaf,
+        min_samples_split,
+        min_purity_increase,
+        rng = rngs)
+    # More trees
+    if n_trees > 1
+        for i = 2:n_trees
+            inds = rand(rngs, 1:t_samples, n_samples)
+            cur_tree = build_tree(
+                labels[inds],
+                features[inds,:],
+                n_subfeatures,
+                max_depth,
+                min_samples_leaf,
+                min_samples_split,
+                min_purity_increase,
+                rng = rngs)
+
+            forest = vcat(forest, cur_tree)
+        end
     end
+
+    # OLD parallel way of doing the above
+    # forest = Distributed.@distributed (vcat) for i in 1:n_trees
+    #     inds = rand(rngs, 1:t_samples, n_samples)
+    #     build_tree(
+    #         labels[inds],
+    #         features[inds,:],
+    #         n_subfeatures,
+    #         max_depth,
+    #         min_samples_leaf,
+    #         min_samples_split,
+    #         min_purity_increase,
+    #         rng = rngs)
+    # end
 
     if n_trees == 1
         return Ensemble{S, T}([forest])

@@ -105,7 +105,7 @@ function build_forest(
         end
     end
 
-    #println("Testing 1, 2, 3")
+    println("Testing 1, 2, 3")
 
     # OLD parallel way of doing the above
     # forest = Distributed.@distributed (vcat) for i in 1:n_trees
